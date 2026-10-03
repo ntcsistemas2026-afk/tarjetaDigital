@@ -25,20 +25,39 @@
   .ayuda { color: #a9a9a9; font-size: .85rem; margin-top: 18px; width: 100%; max-width: 420px; line-height: 1.4; }
   .error { background: #2a1010; color: #fca5a5; border-left: 4px solid #dc2626; padding: 14px; border-radius: 6px; width: 100%; max-width: 420px; text-align: left; }
   .hora { font-variant-numeric: tabular-nums; }
+  .instalar { width: 100%; max-width: 420px; margin-top: 18px; }
+  .instalar button { width: 100%; border: 0; border-radius: 10px; padding: 15px; background: var(--acento); color: #fff;
+                     font-size: 1.05rem; font-weight: 700; letter-spacing: .03em; cursor: pointer; }
+  .pasos { background: #1c1c1c; border: 1px solid #363636; border-radius: 10px; padding: 14px 16px; text-align: left; line-height: 1.5; color: #e5e5e5; }
+  .pasos b { color: #fff; }
+  .pasos .ico { display: inline-block; border: 1px solid #666; border-radius: 5px; padding: 0 6px; margin: 0 2px; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <div class="gym" id="gym">Mi Tarjeta Digital</div>
 <p class="nombre" id="nombre"></p>
 <div id="contenido"></div>
+<div class="instalar" id="instalar" hidden>
+  <button type="button" id="btnInstalar" hidden>📲 Instalar en mi celular</button>
+  <div class="pasos" id="pasosIphone" hidden>Para tenerla siempre a mano:<br>
+    1. Toque <span class="ico">⬆</span> <b>Compartir</b> (abajo en Safari)<br>
+    2. Elija <b>"Agregar a pantalla de inicio"</b><br>
+    3. Toque <b>Agregar</b></div>
+  <div class="pasos" id="pasosSafari" hidden>Para instalarla, abra este enlace en <b>Safari</b>: toque el ícono de la brújula o <b>"Abrir en Safari"</b>.</div>
+  <div class="pasos" id="pasosMenu" hidden>Para tenerla siempre a mano: toque el menú <span class="ico">⋮</span> del navegador y elija
+    <b>"Agregar a pantalla de inicio"</b> o <b>"Instalar app"</b>. Si la abrió desde WhatsApp, primero elija <b>"Abrir en Chrome"</b> (o Brave).</div>
+</div>
 <p class="ayuda">Suba el brillo de la pantalla y acerque el celular al lector.<br>
   El código cambia cada 30 segundos: una captura de pantalla no sirve.<br>
   Hora del celular: <span class="hora" id="hora"></span></p>
 
 <script src="JsBarcode.code128.min.js"></script>
 <script>
-// Los datos llegan una sola vez en el enlace (despues de "#", nunca se envian
-// a internet) y quedan guardados en el celular para abrir la app sin enlace.
+// Los datos van en el enlace despues de "#" (nunca se envian a internet).
+// Se dejan en la direccion a proposito: en iPhone el icono de la pantalla de
+// inicio guarda la direccion actual y NO comparte memoria con Safari. Ademas se
+// guardan en el celular por si se abre la app sin enlace (Android).
 const CLAVE = 'tarjetaDigital';
 let datos = null;
 try {
@@ -46,7 +65,6 @@ try {
   if (h.get('c') && h.get('s')) {
     datos = { c: h.get('c'), s: h.get('s'), n: h.get('n') || '', g: h.get('g') || '' };
     localStorage.setItem(CLAVE, JSON.stringify(datos));
-    history.replaceState(null, '', location.pathname); // quita el secreto de la barra de direcciones
   } else {
     datos = JSON.parse(localStorage.getItem(CLAVE) || 'null');
   }
@@ -103,6 +121,40 @@ async function iniciar() {
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+// ---- Instalar en la pantalla de inicio ----
+// Manifest dinamico: start_url = el enlace completo del socio (con sus datos
+// tras "#"). Asi Chrome/Brave ofrecen instalar y el icono del iPhone (que usa
+// start_url y tiene memoria propia, separada de Safari) abre con la tarjeta.
+const instalada = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+if (datos && !instalada) {
+  const abs = p => new URL(p, location.href).href;
+  const man = { name: 'Mi Tarjeta Digital', short_name: datos.g || 'Mi Tarjeta', start_url: abs('./') + '#' + new URLSearchParams(datos),
+                scope: abs('./'), display: 'standalone', orientation: 'portrait', background_color: '#0a0a0a', theme_color: '#0a0a0a',
+                icons: [{ src: abs('icono-192.png'), sizes: '192x192', type: 'image/png' }, { src: abs('icono-512.png'), sizes: '512x512', type: 'image/png' }] };
+  document.querySelector('link[rel=manifest]').href = URL.createObjectURL(new Blob([JSON.stringify(man)], { type: 'application/manifest+json' }));
+
+  const caja = $('instalar'), mostrar = id => { caja.hidden = false; $(id).hidden = false; };
+  const ua = navigator.userAgent;
+  const iphone = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let aviso = null;
+  if (iphone) {
+    mostrar(/CriOS|FxiOS|EdgiOS|WhatsApp|FBAN|Instagram/.test(ua) ? 'pasosSafari' : 'pasosIphone');
+  } else {
+    // Si el navegador no ofrece instalar en unos segundos, se explica el menu
+    aviso = setTimeout(() => mostrar('pasosMenu'), 2500);
+    addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      clearTimeout(aviso); $('pasosMenu').hidden = true;
+      mostrar('btnInstalar');
+      $('btnInstalar').onclick = async () => { e.prompt(); await e.userChoice.catch(() => {}); };
+    });
+  }
+  addEventListener('appinstalled', () => {
+    clearTimeout(aviso);
+    caja.innerHTML = '<div class="pasos">✅ Listo: ya tiene el ícono <b>GYM</b> en su pantalla de inicio.</div>';
+  });
+}
 </script>
 </body>
 </html>

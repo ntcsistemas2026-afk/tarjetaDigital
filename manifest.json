@@ -1,7 +1,6 @@
 {
   "name": "Mi Tarjeta Digital",
   "short_name": "Mi Tarjeta",
-  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

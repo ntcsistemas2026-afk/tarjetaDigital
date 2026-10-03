@@ -1,6 +1,6 @@
 // Guarda la app en el celular para que funcione sin internet.
 // Cambiar VERSION al publicar cambios para que los celulares se actualicen.
-const VERSION = 'tarjetaDigital-v1';
+const VERSION = 'tarjetaDigital-v2';
 const ARCHIVOS = ['./', 'index.html', 'manifest.json', 'JsBarcode.code128.min.js', 'icono-192.png', 'icono-512.png'];
 
 self.addEventListener('install', e => e.waitUntil(caches.open(VERSION).then(c => c.addAll(ARCHIVOS)).then(() => self.skipWaiting())));
