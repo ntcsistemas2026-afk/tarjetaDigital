@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<title>Mi Tarjeta Digital</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icono-192.png">
+<link rel="apple-touch-icon" href="icono-192.png">
+<style>
+  :root { --acento: #f36100; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #0a0a0a; color: #fff; font-family: system-ui, sans-serif;
+         display: flex; flex-direction: column; align-items: center; padding: 24px 16px; text-align: center; }
+  .gym { font-size: 1.6rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin: 8px 0 2px; }
+  .gym::first-letter { color: var(--acento); }
+  .nombre { color: #c4c4c4; margin: 0 0 22px; font-size: 1.05rem; }
+  .tarjeta { background: #fff; color: #000; border-radius: 14px; padding: 18px 14px 14px; width: 100%; max-width: 420px;
+             border-top: 6px solid var(--acento); }
+  svg { width: 100%; height: auto; }
+  .numero { font: 600 1.15rem ui-monospace, monospace; letter-spacing: .12em; margin-top: 6px; }
+  .barra { height: 6px; background: #eee; border-radius: 3px; margin-top: 12px; overflow: hidden; }
+  .barra div { height: 100%; background: var(--acento); transition: width 1s linear; }
+  .ayuda { color: #a9a9a9; font-size: .85rem; margin-top: 18px; width: 100%; max-width: 420px; line-height: 1.4; }
+  .error { background: #2a1010; color: #fca5a5; border-left: 4px solid #dc2626; padding: 14px; border-radius: 6px; width: 100%; max-width: 420px; text-align: left; }
+  .hora { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="gym" id="gym">Mi Tarjeta Digital</div>
+<p class="nombre" id="nombre"></p>
+<div id="contenido"></div>
+<p class="ayuda">Suba el brillo de la pantalla y acerque el celular al lector.<br>
+  El código cambia cada 30 segundos: una captura de pantalla no sirve.<br>
+  Hora del celular: <span class="hora" id="hora"></span></p>
+
+<script src="JsBarcode.code128.min.js"></script>
+<script>
+// Los datos llegan una sola vez en el enlace (despues de "#", nunca se envian
+// a internet) y quedan guardados en el celular para abrir la app sin enlace.
+const CLAVE = 'tarjetaDigital';
+let datos = null;
+try {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get('c') && h.get('s')) {
+    datos = { c: h.get('c'), s: h.get('s'), n: h.get('n') || '', g: h.get('g') || '' };
+    localStorage.setItem(CLAVE, JSON.stringify(datos));
+    history.replaceState(null, '', location.pathname); // quita el secreto de la barra de direcciones
+  } else {
+    datos = JSON.parse(localStorage.getItem(CLAVE) || 'null');
+  }
+} catch (e) { datos = null; }
+
+const $ = id => document.getElementById(id);
+setInterval(() => { $('hora').textContent = new Date().toLocaleTimeString('es-EC'); }, 1000);
+
+if (!datos) {
+  $('contenido').innerHTML = '<div class="error">Esta tarjeta todavía no está activada en este celular. Abra el enlace que le envió el gimnasio.</div>';
+} else {
+  if (datos.g) $('gym').textContent = datos.g;
+  $('nombre').textContent = datos.n;
+  $('contenido').innerHTML = '<div class="tarjeta"><svg id="codigo"></svg><div class="numero" id="numero"></div>'
+    + '<div class="barra"><div id="progreso"></div></div></div>';
+  iniciar();
+}
+
+// TOTP (RFC 6238): HMAC-SHA1 del numero de periodo de 30 s, 6 digitos
+function base32(s) {
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const ch of s.toUpperCase()) { const p = abc.indexOf(ch); if (p >= 0) bits += p.toString(2).padStart(5, '0'); }
+  const out = new Uint8Array(Math.floor(bits.length / 8));
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
+  return out;
+}
+async function totp(clave, paso) {
+  const msg = new ArrayBuffer(8);
+  new DataView(msg).setUint32(4, paso); // paso < 2^32 hasta el ano 6000
+  const h = new Uint8Array(await crypto.subtle.sign('HMAC', clave, msg));
+  const o = h[19] & 15;
+  const n = ((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
+  return String(n % 1000000).padStart(6, '0');
+}
+
+async function iniciar() {
+  const clave = await crypto.subtle.importKey('raw', base32(datos.s), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  let pasoMostrado = -1;
+  async function tick() {
+    const ahora = Date.now() / 1000, paso = Math.floor(ahora / 30);
+    $('progreso').style.width = (100 - (ahora % 30) / 30 * 100) + '%';
+    if (paso === pasoMostrado) return;
+    pasoMostrado = paso;
+    const valor = datos.c + await totp(clave, paso);
+    JsBarcode('#codigo', valor, { format: 'CODE128', displayValue: false, height: 110, width: 2.4, margin: 8 });
+    $('numero').textContent = valor;
+  }
+  await tick();
+  setInterval(tick, 1000);
+  // Mantener la pantalla encendida mientras se muestra la tarjeta
+  try { if ('wakeLock' in navigator) { await navigator.wakeLock.request('screen');
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) navigator.wakeLock.request('screen').catch(() => {}); }); } } catch (e) {}
+}
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
